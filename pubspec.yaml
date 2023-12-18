@@ -8,7 +8,6 @@ environment:
 
 dependencies:
   package_info_plus: ^5.0.1
-  select_any: ^1.0.1
   sprintf: ^7.0.0
   sentry: ^7.7.0
   device_info_plus: ^9.0.2
