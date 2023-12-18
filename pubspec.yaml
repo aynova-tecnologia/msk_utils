@@ -8,14 +8,14 @@ environment:
 
 dependencies:
   package_info_plus: ^5.0.1
-
+  select_any: ^1.0.1
   sprintf: ^7.0.0
   sentry: ^7.7.0
   device_info_plus: ^9.0.2
   path_provider: ^2.0.15
   hive: ^2.2.3
   dio: ^5.2.0+1
-  intl: ^0.19.0
+  intl: ^0.18.1
   flutter_mobx: ^2.0.6+5
   mobx: ^2.2.0
   flutter:
