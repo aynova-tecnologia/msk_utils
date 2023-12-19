@@ -33,6 +33,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.11.0"
+  bloc_pattern:
+    dependency: transitive
+    description:
+      name: bloc_pattern
+      sha256: "633169aa49de0c6c2494af00599c8a744db0317340c966bb81ce6eb1c4f80c20"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.1"
   boolean_selector:
     dependency: transitive
     description:
@@ -169,6 +177,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.4"
+  data_table_plus:
+    dependency: transitive
+    description:
+      name: data_table_plus
+      sha256: "9ce0c3ac56087e12094be59039bb1442cd39c188ee19933b65252e18d3152404"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.1"
   device_info_plus:
     dependency: "direct main"
     description:
@@ -185,6 +201,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.0"
+  diacritic:
+    dependency: transitive
+    description:
+      name: diacritic
+      sha256: a84e03ec2779375fb86430dbe9d8fba62c68376f2499097a5f6e75556babe706
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.4"
   dio:
     dependency: "direct main"
     description:
@@ -227,6 +251,19 @@ packages:
     version: "1.1.0"
   flutter:
     dependency: "direct main"
+    description: flutter
+    source: sdk
+    version: "0.0.0"
+  flutter_date_pickers:
+    dependency: transitive
+    description:
+      name: flutter_date_pickers
+      sha256: "8e35077959d0cb6a915ad1f8c27e5d1e3ef6b1eb13fbefaa18680a3d6c118e13"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.4.2"
+  flutter_localizations:
+    dependency: transitive
     description: flutter
     source: sdk
     version: "0.0.0"
@@ -528,6 +565,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.2.3"
+  select_any:
+    dependency: "direct main"
+    description:
+      name: select_any
+      sha256: "18f22fcadc85139f813e7ec0676723631bf662f976d04a7c72f5c0f7283e8b23"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.1"
   sentry:
     dependency: "direct main"
     description:
@@ -536,6 +581,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.13.2"
+  share_extend:
+    dependency: transitive
+    description:
+      name: share_extend
+      sha256: "98c26f04abae42b0d2080102a42a2653a867a4bec862be1e921cb0cf7cc00916"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.0"
   shelf:
     dependency: transitive
     description:
