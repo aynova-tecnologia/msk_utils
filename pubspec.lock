@@ -568,10 +568,11 @@ packages:
   select_any:
     dependency: "direct main"
     description:
-      name: select_any
-      sha256: "18f22fcadc85139f813e7ec0676723631bf662f976d04a7c72f5c0f7283e8b23"
-      url: "https://pub.dev"
-    source: hosted
+      path: "."
+      ref: HEAD
+      resolved-ref: "95ed75c2db32b2396f90fc45c2f335048b97ec72"
+      url: "https://github.com/aynova-tecnologia/select_any.git"
+    source: git
     version: "1.0.1"
   sentry:
     dependency: "direct main"
