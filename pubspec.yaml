@@ -15,6 +15,9 @@ dependencies:
   sentry: ^7.7.0
   device_info_plus: ^9.0.2
   path_provider: ^2.0.15
+  file_picker_cross:
+    git:
+      url: https://gitlab.com/FabioZvir/file_picker_cross.git
   hive: ^2.2.3
   dio: ^5.2.0+1
   intl: ^0.18.1
