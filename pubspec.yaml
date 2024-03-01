@@ -19,7 +19,7 @@ dependencies:
     git:
       url: https://gitlab.com/FabioZvir/file_picker_cross.git
   hive: ^2.2.3
-  dio: ^5.2.0+1
+  dio: ^4.0.0
   intl: ^0.18.1
   flutter_mobx: ^2.0.6+5
   mobx: ^2.2.0
