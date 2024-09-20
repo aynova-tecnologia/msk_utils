@@ -278,7 +278,7 @@ packages:
     description:
       path: "."
       ref: HEAD
-      resolved-ref: "4fe06576db0f16d304543fc791afe3d46b9d4f37"
+      resolved-ref: "73c725e465471ecce09c6ac582bf0386a19afb9c"
       url: "https://gitlab.com/FabioZvir/file_picker_cross.git"
     source: git
     version: "4.7.0"
