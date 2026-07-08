@@ -12,18 +12,43 @@ class UtilsSentry {
   static String? dsn;
   static String? package;
   static String? version;
+  static String environment = 'production';
+  static String? organizationSlug;
+  static String? projectSlug;
+  static String? boardUrl;
+  static bool enabled = true;
+  static bool sendInDebug = false;
+  static Map<String, String> tags = const {};
 
   /// Inicializa o sentry com alguns dados relevantes, como dsn, o pacote e a versão
-  static init(String dsn, String package, String? version) {
+  static init(
+    String dsn,
+    String package,
+    String? version, {
+    String environment = 'production',
+    String? organizationSlug,
+    String? projectSlug,
+    String? boardUrl,
+    bool enabled = true,
+    bool sendInDebug = false,
+    Map<String, String> tags = const {},
+  }) {
     UtilsSentry.dsn = dsn;
     UtilsSentry.package = package;
     UtilsSentry.version = version;
+    UtilsSentry.environment = environment;
+    UtilsSentry.organizationSlug = organizationSlug;
+    UtilsSentry.projectSlug = projectSlug;
+    UtilsSentry.boardUrl = boardUrl;
+    UtilsSentry.enabled = enabled;
+    UtilsSentry.sendInDebug = sendInDebug;
+    UtilsSentry.tags = Map<String, String>.unmodifiable(tags);
   }
 
   static void configureSentry() {
     FlutterError.onError =
         (FlutterErrorDetails details, {bool forceReport = false}) {
-      if (UtilsPlatform.isDebug) {
+      if (UtilsPlatform.isDebug && !UtilsSentry.sendInDebug && !forceReport) {
         // In development mode, simply print to console.
         FlutterError.dumpErrorToConsole(details);
       } else {
@@ -40,7 +65,11 @@ class UtilsSentry {
     Map<String, dynamic> extra = {
       'platform': UtilsPlatform.isWeb ? '' : Platform.operatingSystem,
       'version': UtilsSentry.version,
-      'package': package
+      'package': package,
+      'sentryEnvironment': UtilsSentry.environment,
+      'sentryOrganization': UtilsSentry.organizationSlug,
+      'sentryProject': UtilsSentry.projectSlug,
+      'sentryBoardUrl': UtilsSentry.boardUrl,
     };
 
     if (UtilsPlatform.isIOS) {
@@ -111,15 +140,20 @@ class UtilsSentry {
     PackageInfo packageInfo = await PackageInfo.fromPlatform();
     return SentryEvent(
         release: packageInfo.version,
-        environment: 'production',
+        environment: UtilsSentry.environment,
         throwable: error,
         timestamp: DateTime.now(),
+        tags: UtilsSentry.tags,
         extra: extra);
   }
 
   static Future<void> reportError(Object error, StackTrace stackTrace,
       {dynamic data, String? dsn}) async {
-    if (UtilsPlatform.isDebug) {
+    if (!UtilsSentry.enabled) {
+      return;
+    }
+
+    if (UtilsPlatform.isDebug && !UtilsSentry.sendInDebug) {
       // In development mode, simply print to console.
       // Print the full stacktrace in debug mode.
       print(error);
@@ -127,8 +161,14 @@ class UtilsSentry {
       return;
     } else {
       try {
+        final String? resolvedDsn = dsn ?? UtilsSentry.dsn;
+        if (resolvedDsn == null || resolvedDsn.isEmpty) {
+          print('Sending report to sentry.io skipped: DSN not configured.');
+          return;
+        }
+
         final SentryClient sentry =
-            new SentryClient(SentryOptions(dsn: dsn ?? UtilsSentry.dsn));
+            new SentryClient(SentryOptions(dsn: resolvedDsn));
 
         final SentryEvent event = await getSentryEnvEvent(error);
         if (event.extra != null) {
