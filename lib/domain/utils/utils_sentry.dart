@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'dart:io';
 import 'dart:async';
 
@@ -8,7 +10,21 @@ import 'package:flutter/widgets.dart';
 
 import 'utils_platform.dart';
 
+typedef _PackageInfoLoader = Future<PackageInfo> Function();
+typedef _PlatformDetailsLoader = Future<Map<String, dynamic>> Function();
+typedef _SentryClientFactory = SentryClient Function(String dsn);
+typedef _SentryEventSender = Future<void> Function(
+  SentryClient client,
+  SentryEvent event, {
+  StackTrace? stackTrace,
+});
+
 class UtilsSentry {
+  static const Symbol _reportingZoneKey = #mskUtilsSentryReporting;
+  static const String _sanitizedFallback = '[unsupported observability value]';
+  static const String _circularReferenceFallback =
+      '[circular observability value]';
+
   static String? dsn;
   static String? package;
   static String? version;
@@ -19,6 +35,15 @@ class UtilsSentry {
   static bool enabled = true;
   static bool sendInDebug = false;
   static Map<String, String> tags = const {};
+  static _PackageInfoLoader _packageInfoLoader = PackageInfo.fromPlatform;
+  static _PlatformDetailsLoader _platformDetailsLoader =
+      _defaultPlatformDetailsLoader;
+  static _SentryClientFactory _sentryClientFactory =
+      (String dsn) => SentryClient(SentryOptions(dsn: dsn));
+  static _SentryEventSender _sentryEventSender =
+      (SentryClient client, SentryEvent event, {StackTrace? stackTrace}) async {
+    await client.captureEvent(event, stackTrace: stackTrace);
+  };
 
   /// Inicializa o sentry com alguns dados relevantes, como dsn, o pacote e a versão
   static init(
@@ -33,36 +58,60 @@ class UtilsSentry {
     bool sendInDebug = false,
     Map<String, String> tags = const {},
   }) {
-    UtilsSentry.dsn = dsn;
+    final String? normalizedDsn = _normalizeDsn(dsn);
+    UtilsSentry.dsn = normalizedDsn;
     UtilsSentry.package = package;
     UtilsSentry.version = version;
     UtilsSentry.environment = environment;
     UtilsSentry.organizationSlug = organizationSlug;
     UtilsSentry.projectSlug = projectSlug;
     UtilsSentry.boardUrl = boardUrl;
-    UtilsSentry.enabled = enabled;
+    UtilsSentry.enabled = enabled && normalizedDsn != null;
     UtilsSentry.sendInDebug = sendInDebug;
     UtilsSentry.tags = Map<String, String>.unmodifiable(tags);
+    if (enabled && normalizedDsn == null) {
+      _debugLog(
+        'Observability disabled because no DSN was configured for package "$package".',
+      );
+    }
   }
 
   static void configureSentry() {
-    FlutterError.onError =
-        (FlutterErrorDetails details, {bool forceReport = false}) {
-      if (UtilsPlatform.isDebug && !UtilsSentry.sendInDebug && !forceReport) {
-        // In development mode, simply print to console.
-        FlutterError.dumpErrorToConsole(details);
-      } else {
-        // In production mode, report to the application zone to report to Sentry.
-        Zone.current.handleUncaughtError(details.exception, details.stack!);
-      }
-    };
+    try {
+      FlutterError.onError =
+          (FlutterErrorDetails details, {bool forceReport = false}) {
+        try {
+          if (_shouldOnlyLogLocally && !forceReport) {
+            FlutterError.dumpErrorToConsole(details);
+            return;
+          }
+
+          Zone.current.handleUncaughtError(
+            details.exception,
+            details.stack ?? StackTrace.current,
+          );
+        } catch (error, stackTrace) {
+          _debugLog(
+            'Observability bootstrap failed while handling FlutterError: '
+            '$error\n$stackTrace',
+          );
+          FlutterError.dumpErrorToConsole(details);
+        }
+      };
+    } catch (error, stackTrace) {
+      _debugLog(
+        'Observability bootstrap failed while configuring FlutterError: '
+        '$error\n$stackTrace',
+      );
+    }
   }
 
-  static Future<SentryEvent> getSentryEnvEvent(dynamic error) async {
+  static Future<SentryEvent> getSentryEnvEvent(
+    dynamic error, {
+    dynamic data,
+  }) async {
     /// return Event with IOS extra information to send it to Sentry
-    final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-
-    Map<String, dynamic> extra = {
+    final Map<String, dynamic> extra = {
       'platform': UtilsPlatform.isWeb ? '' : Platform.operatingSystem,
       'version': UtilsSentry.version,
       'package': package,
@@ -70,11 +119,102 @@ class UtilsSentry {
       'sentryOrganization': UtilsSentry.organizationSlug,
       'sentryProject': UtilsSentry.projectSlug,
       'sentryBoardUrl': UtilsSentry.boardUrl,
+      'json': _sanitizeValue(data),
     };
+
+    try {
+      extra.addAll(_sanitizeMap(await _platformDetailsLoader()));
+    } catch (error, stackTrace) {
+      extra['observabilityDeviceInfoError'] = 'Device info unavailable: $error';
+      _debugLog(
+        'Observability failed while collecting device info: '
+        '$error\n$stackTrace',
+      );
+    }
+
+    final String? release = await _safeReleaseVersion();
+    return SentryEvent(
+      release: release,
+      environment: UtilsSentry.environment,
+      throwable: error,
+      timestamp: DateTime.now(),
+      tags: UtilsSentry.tags,
+      extra: extra,
+    );
+  }
+
+  static Future<void> reportError(
+    Object error,
+    StackTrace stackTrace, {
+    dynamic data,
+    String? dsn,
+  }) async {
+    if (!UtilsSentry.enabled) {
+      return;
+    }
+
+    if (_shouldOnlyLogLocally) {
+      // In development mode, simply print to console.
+      // Print the full stacktrace in debug mode.
+      print(error);
+      print(stackTrace);
+      return;
+    }
+
+    final String? resolvedDsn = _normalizeDsn(dsn ?? UtilsSentry.dsn);
+    if (resolvedDsn == null) {
+      _debugLog('Observability skipped because no DSN is available.');
+      return;
+    }
+
+    if (Zone.current[_reportingZoneKey] == true) {
+      _debugLog('Recursive observability report skipped for "$error".');
+      return;
+    }
+
+    await runZoned(
+      () async {
+        final SentryClient sentry = _sentryClientFactory(resolvedDsn);
+        try {
+          final SentryEvent event = await getSentryEnvEvent(error, data: data);
+          await _sentryEventSender(sentry, event, stackTrace: stackTrace);
+        } catch (observabilityError, observabilityStackTrace) {
+          _debugLog(
+            'Sending report to sentry.io failed: '
+            '$observabilityError\n$observabilityStackTrace\nOriginal error: $error',
+          );
+        }
+      },
+      zoneValues: {_reportingZoneKey: true},
+    );
+  }
+
+  static bool get _shouldOnlyLogLocally =>
+      UtilsPlatform.isDebug && !UtilsSentry.sendInDebug;
+
+  static String? _normalizeDsn(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  static Future<String?> _safeReleaseVersion() async {
+    try {
+      return (await _packageInfoLoader()).version;
+    } catch (error, stackTrace) {
+      _debugLog(
+        'Observability failed while resolving package info: '
+        '$error\n$stackTrace',
+      );
+      return UtilsSentry.version;
+    }
+  }
+
+  static Future<Map<String, dynamic>> _defaultPlatformDetailsLoader() async {
+    final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
 
     if (UtilsPlatform.isIOS) {
       final IosDeviceInfo iosDeviceInfo = await deviceInfo.iosInfo;
-      extra.addAll({
+      return {
         'name': iosDeviceInfo.name,
         'model': iosDeviceInfo.model,
         'systemName': iosDeviceInfo.systemName,
@@ -84,11 +224,13 @@ class UtilsSentry {
         'identifierForVendor': iosDeviceInfo.identifierForVendor,
         'isPhysicalDevice': iosDeviceInfo.isPhysicalDevice,
         'version': UtilsSentry.version,
-        'package': package
-      });
-    } else if (UtilsPlatform.isAndroid) {
+        'package': package,
+      };
+    }
+
+    if (UtilsPlatform.isAndroid) {
       final AndroidDeviceInfo androidDeviceInfo = await deviceInfo.androidInfo;
-      extra.addAll({
+      return {
         'type': androidDeviceInfo.type,
         'model': androidDeviceInfo.model,
         'device': androidDeviceInfo.device,
@@ -104,82 +246,142 @@ class UtilsSentry {
         'supportedAbis': androidDeviceInfo.supportedAbis,
         'isPhysicalDevice': androidDeviceInfo.isPhysicalDevice,
         'package': package,
-        'version': androidDeviceInfo.version.codename
-      });
-    } else if (UtilsPlatform.isMacos) {
+        'version': androidDeviceInfo.version.codename,
+      };
+    }
+
+    if (UtilsPlatform.isMacos) {
       final MacOsDeviceInfo macOsDeviceInfo = await deviceInfo.macOsInfo;
-      extra.addAll(macOsDeviceInfo.data);
-    } else if (UtilsPlatform.isWindows) {
+      return macOsDeviceInfo.data;
+    }
+
+    if (UtilsPlatform.isWindows) {
       final WindowsDeviceInfo windowsDeviceInfo = await deviceInfo.windowsInfo;
-      extra.addAll({
+      return {
         'computerName': windowsDeviceInfo.computerName,
         'numberOfCores': windowsDeviceInfo.numberOfCores,
-        'systemMemoryInMegabytes': windowsDeviceInfo.systemMemoryInMegabytes
-      });
-    } else if (UtilsPlatform.isLinux) {
+        'systemMemoryInMegabytes': windowsDeviceInfo.systemMemoryInMegabytes,
+      };
+    }
+
+    if (UtilsPlatform.isLinux) {
       final LinuxDeviceInfo linuxDeviceInfo = await deviceInfo.linuxInfo;
-      extra.addAll({
+      return {
         'buildId': linuxDeviceInfo.buildId,
         'id': linuxDeviceInfo.id,
         'machineId': linuxDeviceInfo.machineId,
         'name': linuxDeviceInfo.name,
         'version': linuxDeviceInfo.version,
         'versionId': linuxDeviceInfo.versionId,
-      });
-    } else if (UtilsPlatform.isWeb) {
+      };
+    }
+
+    if (UtilsPlatform.isWeb) {
       final WebBrowserInfo webBrowserInfo = await deviceInfo.webBrowserInfo;
-      extra.addAll({
+      return {
         'browserName': webBrowserInfo.browserName,
         'deviceMemory': webBrowserInfo.deviceMemory,
         'language': webBrowserInfo.language,
         'hardwareConcurrency': webBrowserInfo.hardwareConcurrency,
-        'platform': webBrowserInfo.platform
-      });
+        'platform': webBrowserInfo.platform,
+      };
     }
 
-    PackageInfo packageInfo = await PackageInfo.fromPlatform();
-    return SentryEvent(
-        release: packageInfo.version,
-        environment: UtilsSentry.environment,
-        throwable: error,
-        timestamp: DateTime.now(),
-        tags: UtilsSentry.tags,
-        extra: extra);
+    return const {};
   }
 
-  static Future<void> reportError(Object error, StackTrace stackTrace,
-      {dynamic data, String? dsn}) async {
-    if (!UtilsSentry.enabled) {
-      return;
+  static Map<String, dynamic> _sanitizeMap(Map<String, dynamic> source) {
+    final Map<String, dynamic> sanitized = <String, dynamic>{};
+    source.forEach((dynamic key, dynamic value) {
+      sanitized[key.toString()] = _sanitizeValue(value);
+    });
+    return sanitized;
+  }
+
+  static dynamic _sanitizeValue(dynamic value, [Set<int>? seen]) {
+    seen ??= <int>{};
+
+    if (value == null || value is num || value is bool || value is String) {
+      return value;
     }
 
-    if (UtilsPlatform.isDebug && !UtilsSentry.sendInDebug) {
-      // In development mode, simply print to console.
-      // Print the full stacktrace in debug mode.
-      print(error);
-      print(stackTrace);
-      return;
-    } else {
-      try {
-        final String? resolvedDsn = dsn ?? UtilsSentry.dsn;
-        if (resolvedDsn == null || resolvedDsn.isEmpty) {
-          print('Sending report to sentry.io skipped: DSN not configured.');
-          return;
-        }
+    if (value is DateTime) {
+      return value.toIso8601String();
+    }
 
-        final SentryClient sentry =
-            new SentryClient(SentryOptions(dsn: resolvedDsn));
+    if (value is Duration || value is Uri) {
+      return value.toString();
+    }
 
-        final SentryEvent event = await getSentryEnvEvent(error);
-        if (event.extra != null) {
-          event.extra!['json'] = data;
-        }
-        print('Sending report to sentry.io ${stackTrace.toString()}');
-        await sentry.captureEvent(event, stackTrace: stackTrace);
-      } catch (e) {
-        print('Sending report to sentry.io failed: $e');
-        print('Original error: $error');
+    if (value is Map) {
+      final int identity = identityHashCode(value);
+      if (!seen.add(identity)) {
+        return _circularReferenceFallback;
       }
+
+      final Map<String, dynamic> sanitized = <String, dynamic>{};
+      value.forEach((dynamic key, dynamic nestedValue) {
+        sanitized[_safeToString(key)] = _sanitizeValue(nestedValue, seen);
+      });
+      seen.remove(identity);
+      return sanitized;
     }
+
+    if (value is Iterable) {
+      final int identity = identityHashCode(value);
+      if (!seen.add(identity)) {
+        return _circularReferenceFallback;
+      }
+
+      final List<dynamic> sanitized = value
+          .map((dynamic item) => _sanitizeValue(item, seen))
+          .toList(growable: false);
+      seen.remove(identity);
+      return sanitized;
+    }
+
+    return _safeToString(value);
+  }
+
+  static String _safeToString(dynamic value) {
+    try {
+      return value.toString();
+    } catch (_) {
+      return _sanitizedFallback;
+    }
+  }
+
+  static void _debugLog(String message) {
+    if (UtilsPlatform.isDebug) {
+      debugPrint(message);
+    }
+  }
+
+  @visibleForTesting
+  static void configureForTests({
+    _PackageInfoLoader? packageInfoLoader,
+    _PlatformDetailsLoader? platformDetailsLoader,
+    _SentryClientFactory? sentryClientFactory,
+    _SentryEventSender? sentryEventSender,
+  }) {
+    _packageInfoLoader = packageInfoLoader ?? _packageInfoLoader;
+    _platformDetailsLoader = platformDetailsLoader ?? _platformDetailsLoader;
+    _sentryClientFactory = sentryClientFactory ?? _sentryClientFactory;
+    _sentryEventSender = sentryEventSender ?? _sentryEventSender;
+  }
+
+  @visibleForTesting
+  static void resetTestOverrides() {
+    _packageInfoLoader = PackageInfo.fromPlatform;
+    _platformDetailsLoader = _defaultPlatformDetailsLoader;
+    _sentryClientFactory =
+        (String dsn) => SentryClient(SentryOptions(dsn: dsn));
+    _sentryEventSender = (
+      SentryClient client,
+      SentryEvent event, {
+      StackTrace? stackTrace,
+    }) async {
+      await client.captureEvent(event, stackTrace: stackTrace);
+    };
   }
 }
