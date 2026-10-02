@@ -8,6 +8,11 @@ import 'package:msk_utils/msk_utils.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:sentry/sentry.dart';
 
+/// Testes que exercitam o SDK so fazem sentido com o Sentry compilado
+/// (`--dart-define=SENTRY_ENABLED=true`); sem a flag o caminho e morto.
+const String _soComSdk =
+    'exercita o SDK do Sentry: rode com --dart-define=SENTRY_ENABLED=true';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -50,6 +55,10 @@ void main() {
   });
 
   test('nao propaga falha ao coletar contexto do dispositivo', () async {
+    if (!UtilsSentry.compilado) {
+      markTestSkipped(_soComSdk);
+      return;
+    }
     SentryEvent? capturedEvent;
 
     UtilsSentry.configureForTests(
@@ -130,6 +139,10 @@ void main() {
   });
 
   test('sanitiza contexto nao serializavel sem crash', () async {
+    if (!UtilsSentry.compilado) {
+      markTestSkipped(_soComSdk);
+      return;
+    }
     SentryEvent? capturedEvent;
 
     UtilsSentry.configureForTests(
@@ -153,7 +166,12 @@ void main() {
     expect(json?['customObject'], '[unsupported observability value]');
   });
 
-  test('nao entra em recursao ao falhar durante a propria captura', () async {
+  test('nao entra em recursao ao falhar durante a propria captura',
+      () async {
+    if (!UtilsSentry.compilado) {
+      markTestSkipped(_soComSdk);
+      return;
+    }
     int captureCount = 0;
 
     UtilsSentry.configureForTests(
