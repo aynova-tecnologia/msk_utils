@@ -20,6 +20,15 @@ typedef _SentryEventSender = Future<void> Function(
 });
 
 class UtilsSentry {
+  /// Flag de compilacao que liga o Sentry. Desligada por padrao.
+  ///
+  /// Como e `const`, dart2js e o AOT eliminam os ramos mortos: quando a define
+  /// nao e passada, todo caminho que toca `package:sentry` fica inalcancavel e
+  /// o codigo do pacote sai do binario (tree-shaking). Para ligar:
+  /// `--dart-define=SENTRY_ENABLED=true`.
+  static const bool compilado =
+      bool.fromEnvironment('SENTRY_ENABLED', defaultValue: false);
+
   static const Symbol _reportingZoneKey = #mskUtilsSentryReporting;
   static const String _sanitizedFallback = '[unsupported observability value]';
   static const String _circularReferenceFallback =
@@ -58,6 +67,20 @@ class UtilsSentry {
     bool sendInDebug = false,
     Map<String, String> tags = const {},
   }) {
+    if (!compilado) {
+      // Sentry fora da build: guarda a config mas nunca habilita.
+      UtilsSentry.dsn = null;
+      UtilsSentry.package = package;
+      UtilsSentry.version = version;
+      UtilsSentry.environment = environment;
+      UtilsSentry.organizationSlug = organizationSlug;
+      UtilsSentry.projectSlug = projectSlug;
+      UtilsSentry.boardUrl = boardUrl;
+      UtilsSentry.enabled = false;
+      UtilsSentry.sendInDebug = sendInDebug;
+      UtilsSentry.tags = Map<String, String>.unmodifiable(tags);
+      return;
+    }
     final String? normalizedDsn = _normalizeDsn(dsn);
     UtilsSentry.dsn = normalizedDsn;
     UtilsSentry.package = package;
@@ -77,6 +100,13 @@ class UtilsSentry {
   }
 
   static void configureSentry() {
+    if (!compilado) {
+      // Sem Sentry na build: nao reporta, mas nao perde o erro no console.
+      FlutterError.onError = (FlutterErrorDetails details) {
+        FlutterError.dumpErrorToConsole(details);
+      };
+      return;
+    }
     try {
       FlutterError.onError =
           (FlutterErrorDetails details, {bool forceReport = false}) {
@@ -110,6 +140,10 @@ class UtilsSentry {
     dynamic error, {
     dynamic data,
   }) async {
+    if (!compilado) {
+      throw StateError('Sentry desativado nesta build (SENTRY_ENABLED).');
+    }
+
     /// return Event with IOS extra information to send it to Sentry
     final Map<String, dynamic> extra = {
       'platform': UtilsPlatform.isWeb ? '' : Platform.operatingSystem,
@@ -149,6 +183,10 @@ class UtilsSentry {
     dynamic data,
     String? dsn,
   }) async {
+    if (!compilado) {
+      return;
+    }
+
     if (!UtilsSentry.enabled) {
       return;
     }
